@@ -1,0 +1,522 @@
+import 'package:axa_driver/core/utils/date_utils.dart';
+import 'package:axa_driver/core/theme/utils/app_layout.dart';
+import 'package:axa_driver/core/theme/app_icons.dart';
+import 'package:axa_driver/core/theme/apptheme.dart';
+import 'package:axa_driver/orders/controller/orders_controller.dart';
+import 'package:axa_driver/orders/model/orders_model.dart';
+import 'package:axa_driver/orders/view/order_detail_view.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:get/get.dart';
+
+class OrdersView extends StatelessWidget {
+  const OrdersView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.find<OrdersController>();
+    final layout = AppLayout.of(context);
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.surface,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: true,
+        automaticallyImplyLeading: false,
+        title: Text('My Deliveries', style: AppTextStyles.headingMedium),
+        // ── Silent refresh dot ─────────────────────────────────────────────
+        // A small pulsing dot in the action area shows when a background
+        // poll is running so the driver knows data is being checked.
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Obx(() {
+              if (!controller.isRefreshing.value) {
+                return const SizedBox(width: 20);
+              }
+              return const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.primary,
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // ── Search + Filter bar ────────────────────────────────────────────
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              layout.hPad,
+              layout.innerGapMd,
+              layout.hPad,
+              layout.innerGapSm,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 46,
+                    child: TextField(
+                      onChanged: controller.onSearchChanged,
+                      style: AppTextStyles.bodyLarge.copyWith(
+                        color: AppColors.textPrimary,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Search orders...',
+                        hintStyle: AppTextStyles.inputHint,
+                        filled: true,
+                        fillColor: AppColors.inputFill,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                        prefixIcon: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          child: SvgPicture.asset(
+                            AppIcons.search,
+                            width: 18,
+                            height: 18,
+                            colorFilter: const ColorFilter.mode(
+                              AppColors.textHint,
+                              BlendMode.srcIn,
+                            ),
+                          ),
+                        ),
+                        prefixIconConstraints: const BoxConstraints(
+                          minWidth: 46,
+                          minHeight: 46,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(30),
+                          borderSide: const BorderSide(
+                            color: AppColors.primary,
+                            width: 1.5,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(30),
+                          borderSide: const BorderSide(
+                            color: AppColors.primary,
+                            width: 1.5,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(30),
+                          borderSide: const BorderSide(
+                            color: AppColors.primary,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                _FilterButton(controller: controller),
+              ],
+            ),
+          ),
+
+          // ── Orders list ────────────────────────────────────────────────────
+          Expanded(
+            child: Obx(() {
+              // Full-screen loader only on first load
+              if (controller.isLoading.value) {
+                return const Center(
+                  child: CircularProgressIndicator(color: AppColors.primary),
+                );
+              }
+
+              if (controller.error.value.isNotEmpty) {
+                return Center(
+                  child: GestureDetector(
+                    onTap: () => controller.fetchOrders(reset: true),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.refresh_rounded,
+                          size: 48,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Try again',
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              if (controller.orders.isEmpty) {
+                // Empty state is also pull-to-refreshable
+                return RefreshIndicator(
+                  color: AppColors.primary,
+                  onRefresh: controller.onRefresh,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      SizedBox(
+                        height: MediaQuery.of(context).size.height * 0.3,
+                      ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.inbox_rounded,
+                            size: 52,
+                            color: AppColors.textHint,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No orders found',
+                            style: AppTextStyles.bodyMedium,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Pull down to refresh',
+                            style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.textHint,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return RefreshIndicator(
+                color: AppColors.primary,
+                // ← onRefresh wired to controller.onRefresh which also
+                //   resets the polling timer
+                onRefresh: controller.onRefresh,
+                child: ListView.separated(
+                  controller: controller.scrollController,
+                  // AlwaysScrollableScrollPhysics ensures the drag gesture
+                  // fires even when the list is shorter than the screen
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
+                    layout.hPad,
+                    layout.innerGapSm,
+                    layout.hPad,
+                    layout.sectionGap,
+                  ),
+                  itemCount:
+                      controller.orders.length +
+                      (controller.isLoadingMore.value ? 1 : 0),
+                  separatorBuilder: (_, __) =>
+                      SizedBox(height: layout.innerGapSm),
+                  itemBuilder: (context, index) {
+                    // Pagination spinner at the bottom
+                    if (index == controller.orders.length) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      );
+                    }
+
+                    final order = controller.orders[index];
+                    return _OrderCard(order: order, layout: layout);
+                  },
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Filter button ─────────────────────────────────────────────────────────────
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({required this.controller});
+  final OrdersController controller;
+
+  // REPLACE the entire _FilterButton build method:
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _showFilterSheet(context),
+      child: Obx(
+        () => Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: controller.selectedStatus.value.isNotEmpty
+                    ? AppColors.primary
+                    : AppColors.primary,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(
+                Icons.tune_rounded,
+                color: AppColors.white,
+                size: 20,
+              ),
+            ),
+
+            // ── Red dot badge when filter is active ──────────────────────
+            if (controller.selectedStatus.value.isNotEmpty)
+              Positioned(
+                top: -4,
+                right: -4,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: AppColors.statusCancelled, // red
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.white, width: 2),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFilterSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: AppColors.surface,
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Filter by Status', style: AppTextStyles.headingSmall),
+            const SizedBox(height: 14),
+            Obx(
+              () => Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: OrdersController.statusOptions.map((s) {
+                  final isSelected = s == 'all'
+                      ? controller.selectedStatus.value.isEmpty
+                      : controller.selectedStatus.value == s;
+                  return GestureDetector(
+                    onTap: () {
+                      controller.onStatusSelected(s);
+                      Get.back();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? AppColors.primary
+                            : AppColors.inputFill,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isSelected
+                              ? AppColors.primary
+                              : AppColors.border,
+                        ),
+                      ),
+                      child: Text(
+                        s[0].toUpperCase() + s.substring(1),
+                        style: AppTextStyles.labelMedium.copyWith(
+                          color: isSelected
+                              ? AppColors.white
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Single order card ─────────────────────────────────────────────────────────
+class _OrderCard extends StatelessWidget {
+  const _OrderCard({required this.order, required this.layout});
+  final OrdersModel order;
+  final AppLayout layout;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppDimens.cardRadius),
+        boxShadow: AppShadows.card,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _IconText(
+                  icon: AppIcons.profile,
+                  text: order.customerName.isNotEmpty
+                      ? order.customerName
+                      : '—',
+                  isTitle: true,
+                ),
+                const SizedBox(height: 4),
+                _IconText(
+                  icon: AppIcons.map,
+                  text: order.customerAddress.isNotEmpty
+                      ? order.customerAddress
+                      : '—',
+                ),
+                const SizedBox(height: 4),
+                _IconText(icon: AppIcons.bag, text: order.itemSummary),
+                if (order.scheduledDate != null) ...[
+                  const SizedBox(height: 4),
+                  _IconText(
+                    icon: AppIcons.calender,
+                    text: AppDateUtils.formatShortDate(order.scheduledDate),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _StatusChip(status: order.status),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 32,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Get.to(
+                      () => OrderDetailView(orderId: order.id),
+                      transition: Transition.rightToLeft,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.white,
+                    elevation: 0,
+                    shape: const StadiumBorder(),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                  ),
+                  child: Text(
+                    'View Details',
+                    style: AppTextStyles.buttonSmall.copyWith(fontSize: 11),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Status chip ───────────────────────────────────────────────────────────────
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: statusSurfaceColor(status),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        status[0].toUpperCase() + status.substring(1),
+        style: AppTextStyles.labelSmall.copyWith(
+          color: statusColor(status),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Icon + text row ────────────────────────────────────────────────────────────
+class _IconText extends StatelessWidget {
+  const _IconText({
+    required this.icon,
+    required this.text,
+    this.isTitle = false,
+  });
+  final dynamic icon;
+  final String text;
+  final bool isTitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isTitle ? AppColors.primary : AppColors.textSecondary;
+    return Row(
+      children: [
+        if (icon is String)
+          SvgPicture.asset(
+            icon as String,
+            width: 13,
+            height: 13,
+            colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+          )
+        else
+          Icon(icon as IconData, size: 13, color: color),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            text,
+            style: isTitle
+                ? AppTextStyles.headingSmall.copyWith(
+                    color: AppColors.primary,
+                    fontSize: 13,
+                  )
+                : AppTextStyles.bodyMedium.copyWith(fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
